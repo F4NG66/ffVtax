@@ -1,62 +1,74 @@
 import argparse
-import os
 from bloom_filter_handler import BloomFilterHandler
 from sequence_matcher import SequenceMatcher
-from scoring import calculate_scores
-from gca_to_taxid import add_taxid_to_scored_output
+import os
+import pandas as pd
+import gca_to_taxid
+
 
 def main():
     # 创建命令行参数解析器
-    parser = argparse.ArgumentParser(description="Run viral sequence matching, scoring, and taxid lookup.")
+    parser = argparse.ArgumentParser(description="Run viral sequence matching and calculate Jaccard and Qcov.")
     parser.add_argument('-i', '--input', required=True, help="Input query sequence file (FASTA format)")
     parser.add_argument('-d', '--database', required=True, help="Path to the reference database directory")
-    parser.add_argument('-o', '--output', required=True, help="Output directory for results")
-    parser.add_argument('--kmer_size', type=int, default=21, help="k-mer size (default: 21)")
-    parser.add_argument('--error_rate', type=float, default=0.001, help="Error rate for the Bloom filter (default: 0.001)")
+    parser.add_argument('-o', '--output', required=True, help="Output directory for CSV results")
+    parser.add_argument('--kmer_size', type=int, default=21, help="K-mer size (default: 21)")
+    parser.add_argument('--error_rate', type=float, default=0.001, help="Bloom filter error rate (default: 0.001)")
     parser.add_argument('--jacc_threshold', type=float, default=0.95, help="Jaccard index threshold (default: 0.95)")
     parser.add_argument('--qcov_threshold', type=float, default=0.8, help="Query coverage threshold (default: 0.8)")
-
+    parser.add_argument('--taxid', default="taxid.map", help= "the path to taxid.map file")
     args = parser.parse_args()
-
-    # 确保输出目录存在
-    if not os.path.exists(args.output):
-        os.makedirs(args.output)
 
     # 初始化 BloomFilterHandler 并加载数据库
     print("Loading reference database...")
     bloom_handler = BloomFilterHandler(kmer_size=args.kmer_size, factor=4)
-    bloom_handler.error_rate = args.error_rate  # 设置用户指定的错误率
     bloom_handler.load_database(args.database)
     print("Database loaded successfully.")
 
+    # 输出文件路径
+    output_dir = args.output
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+    matching_result_file = os.path.join(output_dir, "matching_results.csv")
+
     # 初始化 SequenceMatcher 并进行序列匹配
-    print(f"Matching sequences from {args.input}...")
+    print(f"Matching sequences from {args.input} and calculating Jaccard and Qcov...")
     matcher = SequenceMatcher(bloom_handler)
-    matched_references = matcher.match_sequences(args.input)
-    print("Sequence matching completed.")
+    matcher.match_sequences(args.input, matching_result_file)
+    print(f"Matching results saved to {matching_result_file}")
 
-    # 输出匹配结果到 CSV 文件
-    matching_result_file = os.path.join(args.output, "matching_results.csv")
-    print(f"Writing matching results to {matching_result_file}...")
-    matcher.output_to_csv(matched_references, matching_result_file)
-    print("Matching results written to CSV.")
+    gca_to_taxid.add_taxid_to_scored_output(matching_result_file, args.taxid)
+    # 过滤匹配结果并保存到 CSV
+    filter_and_sort_results(matching_result_file, os.path.join(output_dir, "filtered_results.csv"), args.jacc_threshold, args.qcov_threshold)
+    print(f"Filtered results saved to {os.path.join(output_dir, 'filtered_results.csv')}")
 
-    # 计算 Jaccard 和 Qcov 分数，并输出到 scored_output.csv 文件
 
-    scored_output_file = os.path.join(args.output, "scored_output.csv")
-    print(f"Calculating Jaccard and Query Coverage scores...")
-    calculate_scores(matching_result_file, scored_output_file,
-                 jacc_threshold=args.jacc_threshold,
-                 qcov_threshold=args.qcov_threshold)
-    print(f"Scores added and saved to {scored_output_file} and filtered results saved to output directory.")
 
-    # 将 TaxID 添加到 scored_output 文件
-    taxid_map_file = "taxid.map"  # 假设 taxid.map 文件固定位置
-    output_with_taxid = os.path.join(args.output, "scored_output_with_taxid.csv")
-    print(f"Adding TaxID information based on GCA from {taxid_map_file}...")
-    add_taxid_to_scored_output(scored_output_file, output_with_taxid, taxid_map_file)
-    print(f"TaxID column added to {output_with_taxid}")
+def filter_and_sort_results(input_csv, output_csv, jacc_threshold=0.95, qcov_threshold=0.8):
+    """
+    读取匹配结果的 CSV 文件，根据 Jaccard 和 Qcov 阈值进行过滤，按优先级排序，并去重。
+    最终将过滤和排序后的结果保存到新的 CSV 文件中。
 
+    :param input_csv: 输入的包含匹配结果的 CSV 文件路径
+    :param output_csv: 输出的过滤和排序后的 CSV 文件路径
+    :param jacc_threshold: Jaccard 阈值，默认值为 0.95
+    :param qcov_threshold: Query Coverage 阈值，默认值为 0.8
+    """
+    # 读取 CSV 文件到 pandas DataFrame
+    data = pd.read_csv(input_csv)
+
+    # 过滤出满足 Jaccard 和 Query Coverage 阈值的结果
+    filtered_results = data[(data['Jacc'] >= jacc_threshold) & (data['Qcov'] >= qcov_threshold)]
+
+    # 按照 Jaccard 和 Query Coverage 进行排序，优先考虑 Jaccard 其次是 Qcov
+    filtered_results = filtered_results.sort_values(by=['Sequence Name', 'Jacc', 'Qcov'], ascending=[True, False, False])
+
+    # 去除重复的 Sequence Name，只保留每个序列的最佳匹配
+    filtered_result = filtered_results.drop_duplicates(subset=['Sequence Name'], keep='first')
+
+    # 将过滤和排序后的结果保存到输出文件
+    filtered_result.to_csv(output_csv, index=False)
+    print(f"Filtered results saved to {output_csv}")
 
 
 if __name__ == "__main__":

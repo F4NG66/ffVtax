@@ -1,4 +1,5 @@
 import csv
+import os
 
 def load_taxid_map(taxid_map_file):
     """
@@ -16,18 +17,19 @@ def load_taxid_map(taxid_map_file):
     return gca_to_taxid
 
 
-def add_taxid_to_scored_output(scored_output_file, output_file, taxid_map_file):
+def add_taxid_to_scored_output(scored_output_file, taxid_map_file):
     """
-    读取 scored_output 文件，使用 taxid.map 文件将 GCA 转换为 TaxID，并将其添加到新文件中。
+    读取 scored_output 文件，使用 taxid.map 文件将 GCA 转换为 TaxID，并将其添加到原文件中。
     :param scored_output_file: 输入的包含 GCA 的 scored_output 文件路径。
-    :param output_file: 输出包含 taxid 的新文件路径。
     :param taxid_map_file: GCA 到 TaxID 的转换文件。
     """
     # 加载 GCA 到 TaxID 的映射表
     gca_to_taxid = load_taxid_map(taxid_map_file)
 
-    # 打开 scored_output 文件并添加 taxid 列
-    with open(scored_output_file, mode='r', newline='') as infile, open(output_file, mode='w', newline='') as outfile:
+    # 创建临时文件，保存带有 TaxID 的更新结果
+    temp_file = f"{scored_output_file}.tmp"
+
+    with open(scored_output_file, mode='r', newline='') as infile, open(temp_file, mode='w', newline='') as outfile:
         reader = csv.reader(infile)
         writer = csv.writer(outfile)
 
@@ -38,11 +40,12 @@ def add_taxid_to_scored_output(scored_output_file, output_file, taxid_map_file):
 
         # 遍历每一行并添加对应的 TaxID
         for row in reader:
-            gca = row[5]  # 假设 GCA 号在第3列 (索引2)
+            gca = row[5]
             taxid = gca_to_taxid.get(gca, 'N/A')  # 如果找不到对应的 TaxID，标记为 'N/A'
             row.append(taxid)
             writer.writerow(row)
 
-    print(f"TaxID column added to {output_file}")
-
+    # 用临时文件替换原始文件
+    os.replace(temp_file, scored_output_file)
+    print(f"TaxID column added to {scored_output_file}")
 
