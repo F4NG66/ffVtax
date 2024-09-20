@@ -1,0 +1,3 @@
+Sequence Name,Total Input k-mers,Reference,Matched k-mers,Reference Total k-mers,GCA Name,Jacc,Qcov,TaxID
+"AF069308.1 Escherichia phage HK022, complete genome",40725,AF069308.1,40725,40731,GCA_000836965.1,1.0,1.0,2681618
+"M60184.1 Macaca mulata papillomavirus 1, complete genome",9414,M60184.1,7948,8008,GCA_000836865.1,0.8389,0.9925,2779844
